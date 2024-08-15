@@ -5,3 +5,4 @@ export const LAZY_COMPONENT = 'lazyImport';
 export const SHOULD_REVALIDATE = 'shouldRevalidate';
 export const PRIVATE_COMPONENT = '_component';
 export const ELEMENT = 'element';
+export const LOADER = 'loader';

@@ -25,17 +25,20 @@ export type BundlerPlugin =
   | WebpackModuleFederationPlugin
   | RspackModuleFederationPlugin;
 
+export type TransformRuntimeOptions = (
+  mfConfig: moduleFederationPlugin.ModuleFederationPluginOptions,
+) => Parameters<typeof init>[0];
+
 export type DataLoaderOptions = {
   baseName: string;
   partialSSRRemotes?: string[];
   metaName?: string;
   serverPlugin?: string;
-  transformRuntimeOptions?: (
-    mfConfig: moduleFederationPlugin.ModuleFederationPluginOptions,
-  ) => Parameters<typeof init>[0];
+  transformRuntimeOptions?: TransformRuntimeOptions;
   fetchSSRByRouteIds?: (
     partialSSRRemotes: string[],
     mfConfig: moduleFederationPlugin.ModuleFederationPluginOptions,
+    transformRuntimeOptions: TransformRuntimeOptions,
   ) => Promise<string[] | undefined>;
   patchMFConfig?: (options: {
     mfConfig: moduleFederationPlugin.ModuleFederationPluginOptions;

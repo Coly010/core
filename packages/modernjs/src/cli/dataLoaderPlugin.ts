@@ -1,7 +1,12 @@
 import path from 'path';
 import { fs } from '@modern-js/utils';
 import type { CliPlugin, AppTools } from '@modern-js/app-tools';
-import type { DataLoaderOptions, InternalModernPluginOptions } from '../types';
+import type { RouteObject } from '@modern-js/runtime/router';
+import type {
+  DataLoaderOptions,
+  InternalModernPluginOptions,
+  TransformRuntimeOptions,
+} from '../types';
 import type { init } from '@module-federation/enhanced/runtime';
 import { transformName2Prefix } from '../runtime/utils';
 import { PLUGIN_IDENTIFIER } from '../constant';
@@ -12,7 +17,15 @@ import {
 } from '../runtime/constant';
 import { generateRoutes, generateSlimRoutes } from './ast';
 import { MODERN_JS_FILE_SYSTEM_ROUTES_FILE_NAME, META_NAME } from './constant';
-import type { moduleFederationPlugin } from '@module-federation/sdk';
+import {
+  type moduleFederationPlugin,
+  ManifestFileName,
+} from '@module-federation/sdk';
+import { getIPV4, replaceRemoteUrl } from './utils';
+import {
+  SerializableRoutesPlugin,
+  SERIALIZABLE_ROUTES,
+} from './bundler-plugins/SerializableRoutesPlugin';
 
 function generateExtraExposeFiles(
   options: Parameters<Required<DataLoaderOptions>['patchMFConfig']>[0],
@@ -117,60 +130,55 @@ function _pathMfConfig(
   addExpose(options);
 }
 
-// async function _fetchSSRByRouteIds(
-//   partialSSRRemotes: string[],
-//   mfConfig: moduleFederationPlugin.ModuleFederationPluginOptions,
-// ): Promise<undefined | string[]> {
-//   if (!mfConfig.remotes || !Object.keys(mfConfig.remotes).length) {
-//     return undefined;
-//   }
-//   if (!partialSSRRemotes.length) {
-//     return undefined;
-//   }
+async function _fetchSSRByRouteIds(
+  partialSSRRemotes: string[],
+  mfConfig: moduleFederationPlugin.ModuleFederationPluginOptions,
+  transformRuntimeFn: TransformRuntimeOptions,
+): Promise<undefined | string[]> {
+  const partialMfConfig = {
+    name: mfConfig.name!,
+    remotes: { ...mfConfig.remotes },
+  };
+  replaceRemoteUrl(partialMfConfig, 'ipv4');
+  const runtimeInitOptions = transformRuntimeFn(partialMfConfig);
 
-//   const remoteMfModernRouteJsonUrls = Object.entries(mfConfig.remotes).map(
-//     (item) => {
-//       const [_key, config] = item as [
-//         string,
-//         (
-//           | moduleFederationPlugin.RemotesConfig
-//           | moduleFederationPlugin.RemotesItem
-//         ),
-//       ];
-//       const entry =
-//         typeof config === 'string' ? config : (config.external as string);
-//       const [_name, url] = entry.split('@');
-//       const mfModernRouteJsonUrl = url.replace(
-//         new URL(url.startsWith('//') ? `http:${url}` : url).pathname,
-//         `/${MF_MODERN_ROUTE_JSON}`,
-//       );
-//       return mfModernRouteJsonUrl;
-//     },
-//   );
+  if (!runtimeInitOptions.remotes.length || !partialSSRRemotes.length) {
+    return undefined;
+  }
 
-//   const remoteProviderRouteIds: Set<string> = new Set();
-//   await Promise.all(
-//     remoteMfModernRouteJsonUrls.map(async (url) => {
-//       const rep = await fetch(url);
-//       const routeJson: MFModernRouteJson =
-//         (await rep.json()) as MFModernRouteJson;
-//       const prefix = routeJson.prefix;
-//       const collectIds = (route: Route) => {
-//         remoteProviderRouteIds.add(`${prefix}${route.id}`);
-//         if (route.children) {
-//           route.children.forEach((r) => {
-//             collectIds(r);
-//           });
-//         }
-//       };
-//       Object.values(routeJson.routes).forEach((routeArr) => {
-//         routeArr.forEach((r) => collectIds(r));
-//       });
-//     }),
-//   );
-//   console.log(111, [...remoteProviderRouteIds]);
-//   return [...remoteProviderRouteIds];
-// }
+  const remoteProviderRouteIds: Set<string> = new Set();
+
+  const collectIds = (route: RouteObject) => {
+    remoteProviderRouteIds.add(route.id!);
+    if (route.children) {
+      route.children.forEach((r) => {
+        collectIds(r);
+      });
+    }
+  };
+
+  await Promise.all(
+    runtimeInitOptions.remotes.map(async (remote) => {
+      const entry = 'entry' in remote ? remote.entry : '';
+      if (!entry) {
+        return undefined;
+      }
+      const ipv4 = getIPV4();
+      const url = new URL(entry);
+      const serializableRoutesUrl = url.href
+        .replace(url.pathname, `/${SERIALIZABLE_ROUTES}`)
+        .replace('localhost', ipv4);
+      const serializableRoutesRet = await fetch(serializableRoutesUrl);
+      const serializableRoutes =
+        (await serializableRoutesRet.json()) as RouteObject[];
+      serializableRoutes.forEach((serializableRoute) => {
+        collectIds(serializableRoute);
+      });
+    }),
+  );
+
+  return [...remoteProviderRouteIds];
+}
 
 function _transformRuntimeOptions(
   buildOptions: moduleFederationPlugin.ModuleFederationPluginOptions,
@@ -246,20 +254,18 @@ export const moduleFederationDataLoaderPlugin = (
         return { plugins };
       },
       config: async () => {
-        console.log('dataloader plugin config');
-
-        // const fetchFn = fetchSSRByRouteIds || _fetchSSRByRouteIds;
-        // const ssrByRouteIds = await fetchFn(
-        //   partialSSRRemotes,
-        //   internalOptions.csrConfig!,
-        // );
-        // console.log('ssrByRouteIds: ', ssrByRouteIds);
+        const fetchFn = fetchSSRByRouteIds || _fetchSSRByRouteIds;
+        const ssrByRouteIds = await fetchFn(
+          partialSSRRemotes,
+          internalOptions.csrConfig!,
+          transformRuntimeFn,
+        );
         const patchMFConfigFn = patchMFConfig || _pathMfConfig;
 
         return {
-          // server: {
-          //   ssrByRouteIds: ssrByRouteIds,
-          // },
+          server: {
+            ssrByRouteIds: ssrByRouteIds,
+          },
           tools: {
             rspack(_config, { isServer }) {
               patchMFConfigFn({
@@ -271,7 +277,37 @@ export const moduleFederationDataLoaderPlugin = (
                 isServer,
                 routesFilePath,
               });
-              console.log('dataloader plugin rspack');
+            },
+            webpack(_config, { isServer }) {
+              patchMFConfigFn({
+                mfConfig: isServer
+                  ? internalOptions.ssrConfig!
+                  : internalOptions.csrConfig!,
+                baseName,
+                metaName,
+                isServer,
+                routesFilePath,
+              });
+            },
+            bundlerChain(chain, { isServer }) {
+              if (
+                !isServer &&
+                internalOptions.csrConfig &&
+                Object.keys(
+                  internalOptions.csrConfig.exposes as Record<string, string>,
+                ).length
+              ) {
+                chain
+                  .plugin('SerializableRoutesPlugin')
+                  .use(SerializableRoutesPlugin, [
+                    {
+                      routesFilePath,
+                      prefix: transformName2Prefix(
+                        internalOptions.csrConfig.name!,
+                      ),
+                    },
+                  ]);
+              }
             },
           },
           source: {

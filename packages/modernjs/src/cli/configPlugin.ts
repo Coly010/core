@@ -67,8 +67,6 @@ export const moduleFederationConfigPlugin = (
 
     return {
       config: async () => {
-        console.log('config plugin config');
-
         const bundlerType =
           useAppContext().bundlerType === 'rspack' ? 'rspack' : 'webpack';
         const ipv4 = getIPV4();

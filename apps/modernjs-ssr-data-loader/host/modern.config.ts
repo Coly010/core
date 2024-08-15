@@ -25,7 +25,7 @@ export default defineConfig({
     moduleFederationPlugin({
       dataLoader: {
         baseName: 'federationHost',
-        // partialSSRRemotes:['remote']
+        partialSSRRemotes: ['remote'],
       },
     }),
   ],

@@ -47,7 +47,7 @@ const injectRuntimePlugins = (
   }
 };
 
-const replaceRemoteUrl = (
+export const replaceRemoteUrl = (
   mfConfig: moduleFederationPlugin.ModuleFederationPluginOptions,
   remoteIpStrategy?: 'ipv4' | 'inherit',
 ) => {
