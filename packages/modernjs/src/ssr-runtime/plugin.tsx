@@ -4,7 +4,7 @@ import { SSRLiveReload } from './SSRLiveReload';
 console.log('mfSSRPlugin trigger');
 export const mfSSRPlugin = (): Plugin => ({
   name: '@module-federation/modern-js',
-
+  pre: ['@modern-js/plugin-router'],
   setup: () => {
     return {
       async beforeRender() {
